@@ -22,7 +22,9 @@ typedef struct _TARGET {
 	Elf64_Ehdr header;
 	Elf64_Phdr *pheader;
 	Elf64_Dyn  *dyntable; // the DYNAMIC segment copied from target.
-	void *plt_got_address;
+	
+	void *plt_got_address; // address of plt got in target VA space.
+	Elf64_Addr *plt_got; // the plt got copied from target.	
 	
 	// Dynamic relocation information
 	size_t pltrelsz; // size in bytes of plt got relocation table used by dynamic linker.
@@ -36,9 +38,9 @@ typedef struct _TARGET {
 	
 	//Dynamic symbols table and string table
 	size_t symtabsz;
-	void *symtab_address;
+	Elf64_Sym *symtab;
 	size_t strtabsz;
-	void *strtab_address;
+	char *strtab;
 
 } TARGET;
 
@@ -137,7 +139,10 @@ int target_init(TARGET *target, pid_t pid) {
 void target_free(TARGET *target) {
 	free(target->pheader); target->pheader = NULL;
 	free(target->dyntable); target->dyntable = NULL;
-	free(target->u1.pltrelatable);
+	free(target->plt_got); target->plt_got = NULL;
+	free(target->u1.pltrelatable); target->u1.pltrelatable = NULL;
+	free(target->symtab); target->symtab = NULL;
+	free(target->strtab); target->strtab = NULL;
 	
 	ptrace(PTRACE_DETACH, target->pid, 0, 0);
 }
@@ -214,7 +219,7 @@ int target_parse_remote_elf(TARGET *target) {
 	fprintf(stderr, "[+] DYNAMIC section VA %p (size %llu bytes)\n", 
 			dynamic_address, (unsigned long long) dynamic_size);
 
-	/* Copy dynamic information from target and look for the PLT GOT */
+	/* Copy dynamic section from target and look for the PLT GOT */
 	Elf64_Dyn *dyntable = xmalloc(dynamic_size);
 	target->dyntable = dyntable;
 	if(!ReadProcessMemory(pid, dynamic_address, dyntable, dynamic_size))
@@ -233,6 +238,9 @@ int target_parse_remote_elf(TARGET *target) {
 		return -1;
 	}
 	target->plt_got_address = plt_got_address;
+	/* Copy plt table */
+	reserve mem
+	if(!ReadProcessMemory(pid, plt_got_address, target->plt_got, ))
 	
 	/* Find and copy the dynamic relocation information. */
 	
@@ -284,7 +292,7 @@ int target_parse_remote_elf(TARGET *target) {
 	//write(1, (const void*)pltreltable, pltrelsz);
 
 	// just some tests here ---------------------------------------------------
-	Elf64_Rela *rels = target->u1.pltrelatable;
+	/*Elf64_Rela *rels = target->u1.pltrelatable;
 	size_t nrels = target->pltrelsz / sizeof(Elf64_Rela);
 	
 	fprintf(stderr,"\n\n---- SOME RELOCATION TARGET VAs ---- (nrels=%llu) \n\n",
@@ -297,7 +305,7 @@ int target_parse_remote_elf(TARGET *target) {
 			 (void*) rels[i].r_offset, fixva, 
 			 (unsigned long long)ELF64_R_SYM(rels[i].r_info),
 			 (unsigned long)ELF64_R_TYPE(rels[i].r_info));
-	}
+	}*/
 	//-------------------------------------------------------------------------
 	
 	/* Copy dynamic string table and symbol table */
@@ -305,30 +313,52 @@ int target_parse_remote_elf(TARGET *target) {
 	
 	void *symtab_address = NULL;
 	size_t symtabsz = 0; int foundSymtabsz = 0;
-	void *strtab_address;
-	size_t strtabsz;
+	void *strtab_address = NULL;
+	size_t strtabsz = 0; int foundStrtabsz = 0;
 	
 	for(Elf64_Dyn *dentry = dyntable;  dentry->d_tag != DT_NULL; dentry++) {
 		switch(dentry->d_tag) {
 			case DT_SYMTAB:
+				symtab_address = (void*) dentry->d_un.d_ptr;
 			break;
-			case: DT_SYMENT:
+			/*case XXXXXXX: // NECESITO AYUDA PARA SABER EL TAMAÑO O NUM.SIMBOLOS
+				foundSymtabsz = 1;
+				symtabsz = (size_t) dentry->d_un.d_val;
 			break;
-			case DT_STRTAB:
+			*/case DT_STRTAB:
+				strtab_address = (void*) dentry->d_un.d_ptr;
 			break;
-			case DT_STRSZ:	
+			case DT_STRSZ:
+				foundStrtabsz = 1;
+				strtabsz = (size_t) dentry->d_un.d_val;
 			break;
 		}
 	}
 	
-	/* 
-	 * 	
-	//Dynamic symbols table and string table
-	size_t symtabsz;
-	void *symtab_address;
-	size_t strsz;
-	void *strtab_address;
-	 * */
+	if(!symtab_address || !strtab_address || 
+		//!foundSymtabsz 
+		 !foundStrtabsz) 
+	{
+			fprintf(stderr, "[-] Could not find dynamic symbol table or string table in memory\n");
+			return -1;
+	}
+	
+	fprintf(stderr, "[+] Dynamic symbol table at %p (size %llu bytes)\n", 
+		symtab_address, (unsigned long long) symtabsz);
+	fprintf(stderr, "[+] Dynamic string table at %p (size %llu bytes)\n", 
+		strtab_address, (unsigned long long) strtabsz);
+	fprintf(stderr, "CACA -- %llu\n", (unsigned long long) sizeof(Elf64_Sym) );
+	
+	target->strtab = xmalloc(strtabsz);
+	if(!ReadProcessMemory(pid, strtab_address, target->strtab, strtabsz)) {
+		error(6, errno, 
+			  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");	
+	}
+	//DEBUG
+	//write(1, (const void*)target->strtab, strtabsz);
+	
+	// TODO copy symbol table, buut first find out its size LOL
+	
 	return 1;
 }
 

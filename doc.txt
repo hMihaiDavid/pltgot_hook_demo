@@ -1,0 +1,55 @@
+A linker?? (http://linker.iecc.com/)
+plt infect persistence
+reflexify
+the debugger ui for web
+something to learn dynamic linking in linux
+--> sé cómo van los simbolos en windows, pero no en linux
+en PE los simbolos son por module, en elf parecen ser globales
+EXPORTS en PE si pero en ELF NO SÉ!! COMPARATIVE APPROACH
+http://phrack.org/issues/56/7.html
+https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-42444.html#scrolltoc
+https://www.uclibc.org/docs/psABI-x86_64.pdf
+http://www.skyfree.org/linux/references/ELF_Format.pdf
+https://gist.github.com/DhavalKapil/2243db1b732b211d0c16fd5d9140ab0b <-- read last paragraph
+http://man7.org/linux/man-pages/man3/dladdr.3.html
+
+code caves in the elf, dynamic relocation info <.. NO! IT'S STILL IN MEMORY
+
+whatsapp read
+
+GOT PLT article?
+
+
+
+0x55d132226000 base
+mike@mike-laptop:~/Desktop/pltgot$ readelf -r /bin/bash | grep exit
+000000306e28  00c000000007 R_X86_64_JUMP_SLO 0000000000000000 exit@GLIBC_2.2.5 + 0
+|-> 0x55d132226000 + 0x000000306e28 = 0x55d13252ce28
+
+r_offset for exe is va of place to fix, relative to base if pie
+
+----DYNAMIC RELOCS-----
+from r_info extract type with ELF64_R_TYPE(r_info) and sym table index with ELF64_R_SYM(...)
+SUPONGO que el sym table index es el indice del simbolo en la tabla de simbolos dinamicos.
+https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-1235.html#scrolltoc
+|- PUNTO 5 "The relocation table is identified by the DT_JUMPREL dynamic section entry"
+
+DT_JMPREL
+    The address of relocation entries that are associated solely with the procedure linkage table. See Procedure Linkage Table (Processor-Specific). The separation of these relocation entries enables the runtime linker to ignore these entries when the object is loaded with lazy binding enabled. This element requires the DT_PLTRELSZ and DT_PLTREL elements also be present.
+
+	DT_PLTREL
+    Indicates the type of relocation entry to which the procedure linkage table refers, either DT_REL or DT_RELA. All relocations in a procedure linkage table must use the same relocation. See Procedure Linkage Table (Processor-Specific). This element requires a DT_JMPREL element also be present.
+
+DT_PLTRELSZ
+    The total size, in bytes, of the relocation entries associated with the procedure linkage table. See Procedure Linkage Table (Processor-Specific).
+
+----DYNAMIC SYMBOLS-------
+
+
+
+
+
+
+
+
+
