@@ -10,8 +10,13 @@ http://phrack.org/issues/56/7.html
 https://docs.oracle.com/cd/E23824_01/html/819-0690/chapter6-42444.html#scrolltoc
 https://www.uclibc.org/docs/psABI-x86_64.pdf
 http://www.skyfree.org/linux/references/ELF_Format.pdf
+https://github.com/hjl-tools/x86-psABI/wiki/X86-psABI
 https://gist.github.com/DhavalKapil/2243db1b732b211d0c16fd5d9140ab0b <-- read last paragraph
 http://man7.org/linux/man-pages/man3/dladdr.3.html
+http://www.muppetlabs.com/~breadbox/software/elfkickers.html
+http://bottomupcs.sourceforge.net/csbu/x3824.htm
+https://www.technovelty.org/linux/plt-and-got-the-key-to-code-sharing-and-dynamic-libraries.html
+http://sco.com/developers/gabi/latest/ch5.dynamic.html#got
 
 code caves in the elf, dynamic relocation info <.. NO! IT'S STILL IN MEMORY
 

@@ -16,11 +16,14 @@
 /* All void pointers ending in address are pointers in the VA space of
  * the target process. They are invalid and their data must be copied first. 
  * */
+ 
+ 
+ 
 typedef struct _TARGET {
 	pid_t pid;
 	void *base_address;
-	Elf64_Ehdr header;
-	Elf64_Phdr *pheader;
+	Elf64_Ehdr header; // elf header copied from target.
+	Elf64_Phdr *pheader; // program header copied from target.
 	Elf64_Dyn  *dyntable; // the DYNAMIC segment copied from target.
 	
 	void *plt_got_address; // address of plt got in target VA space.
@@ -37,9 +40,9 @@ typedef struct _TARGET {
 	Elf64_Xword pltreltype; // can be either DT_REL or DT_RELA
 	
 	//Dynamic symbols table and string table
-	size_t symtabsz;
+	size_t symtabsz; // size in bytes
 	Elf64_Sym *symtab;
-	size_t strtabsz;
+	size_t strtabsz; // size in bytes
 	char *strtab;
 
 } TARGET;
@@ -59,6 +62,12 @@ void usage(char *cmd) {
 	printf("Usage: %s <TARGET_PID>\n", cmd);		
 }
 
+/*
+ * Reads size bytes into buffer from the address space
+ * of a remote process given by pid. The data read starts at
+ * base_address in the va space of the remote process.
+ * The process give by pid should be in ptrace-stop already.
+ *  */
 int ReadProcessMemory(int pid, const void *base_address, 
 							void *buffer, size_t size) 
 {
@@ -75,7 +84,7 @@ int ReadProcessMemory(int pid, const void *base_address,
 	for(size_t i = 0; i < sb; i++) {
 		errno = 0;
 		long res = ptrace(PTRACE_PEEKTEXT, pid, (void *) raddr, 0);
-		if(errno) return -1;
+		if(errno) return 0;
 		
 		*laddr = res;
 		raddr += 1;
@@ -85,7 +94,7 @@ int ReadProcessMemory(int pid, const void *base_address,
 	if(remaining) {
 		errno = 0;
 		long res = ptrace(PTRACE_PEEKTEXT, pid, (void *) raddr, 0);
-		if(errno) return -1;
+		if(errno) return 0;
 		
 		char *p = (char *) laddr;
 		for(int i=0; i<remaining; i++) {
@@ -110,30 +119,34 @@ int main(int argc, char *argv[]) {
 	
 	pid = (pid_t) atoll(argv[1]);
 	
+	if(!target_init(&target, pid))
+		error(2, errno, "target_init");
 	
-	if(target_init(&target, pid) == -1)
-		error(2, errno, "target_init: ptrace(PTRACE_ATTACH)");
+	if(!target_parse_remote_elf(&target))
+		error(3, errno, "target_parse_remote_elf");
 	
-	target_parse_remote_elf(&target);
-	
-	fprintf(stderr, "[+] PLT GOT at address %p\n", target.plt_got_address);
-	
-	target_free(&target);	
-	
+	target_free(&target);
 	return 0;
 }
 
 int target_init(TARGET *target, pid_t pid) {
-	/* By doing this, if the parsing of the remote ELF fails
-	 * we will not have dangling pointers that will cause corruption in target_free().
-	 * Non-allocated pointers will be NULL and free(NULL) is a no-op.
-	 * */
+	// so that we can call free() after an error.
+	// Unallocated buffers will be NULL so free is no-op.
 	memset((void*)target, 0x00, sizeof(TARGET));
+	
 	target->pid = pid;
+	void *base_address = _get_base_address(pid);
+	if(base_address == NULL) {
+		fprintf(stderr, "[-] Cannot obtain base address.");
+		return 0;
+	}
+	target->base_address = base_address;
 	
 	long res = ptrace(PTRACE_ATTACH, pid, 0, 0);
-	if(res == -1) return -1;
+	if(res == -1) return 0;
 	wait(NULL);
+	
+	return 1;
 }
 
 void target_free(TARGET *target) {
@@ -147,17 +160,9 @@ void target_free(TARGET *target) {
 	ptrace(PTRACE_DETACH, target->pid, 0, 0);
 }
 
-// TODO refactor erro handling.
 int target_parse_remote_elf(TARGET *target) {
-	void *base_address;
+	void *base_address = target->base_address;
 	pid_t pid = target->pid;
-	
-	base_address = _get_base_address(pid);
-	if(base_address == NULL) {
-		fprintf(stderr, "[-] Cannot obtain base address.");
-		return -1;		
-	}
-	target->base_address = base_address;
 	
 	fprintf(stderr, "[+] base address of pid %lu is %p\n",
 			(unsigned long) pid, base_address); 
@@ -166,10 +171,7 @@ int target_parse_remote_elf(TARGET *target) {
 	Elf64_Ehdr *header = &target->header;
 	if(!ReadProcessMemory(pid, base_address, (void*)header, 
 						  sizeof(Elf64_Ehdr))) 
-	{
-			error(3, errno, 
-				  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");
-	}
+		goto _error;
 
 	// DEBUG:
 	//write(1, (const void*)&header, sizeof(header));
@@ -182,10 +184,7 @@ int target_parse_remote_elf(TARGET *target) {
 	target->pheader = pheader;
 	if(!ReadProcessMemory(pid, pheader_address, (void*)pheader,
 						  sizeof(Elf64_Phdr)*header->e_phnum))
-	{
-			error(4, errno, 
-				  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");	
-	}
+		goto _error;
 	
 	// DEBUG:
 	//write(1, (const void*)pheader, sizeof(Elf64_Phdr)*header.e_phnum);
@@ -202,7 +201,7 @@ int target_parse_remote_elf(TARGET *target) {
 	}
 	if(!ph_dynamic) {
 		fprintf(stderr, "[-] Could not find DYNAMIC information.");
-		return -1;		
+		goto _error;		
 	}
 
 	void *dynamic_address; // Address of DYNAMIC Section in target va.
@@ -216,67 +215,88 @@ int target_parse_remote_elf(TARGET *target) {
 		// pointers ellegantly.
 	}
 	
-	fprintf(stderr, "[+] DYNAMIC section VA %p (size %llu bytes)\n", 
+	fprintf(stderr, "[+] DYNAMIC section at %p (size %llu bytes)\n", 
 			dynamic_address, (unsigned long long) dynamic_size);
 
-	/* Copy dynamic section from target and look for the PLT GOT */
+	/* Copy dynamic section from target */
 	Elf64_Dyn *dyntable = xmalloc(dynamic_size);
 	target->dyntable = dyntable;
 	if(!ReadProcessMemory(pid, dynamic_address, dyntable, dynamic_size))
-	{
-		error(5, errno, 
-			  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");	
-	}
+		goto _error;
 
-	void *plt_got_address = NULL;
-	for(Elf64_Dyn *dentry = dyntable;  dentry->d_tag != DT_NULL; dentry++) {
-		if(dentry->d_tag == DT_PLTGOT) {
-			plt_got_address = (void *) dentry->d_un.d_ptr;
-		}
-	}
-	if(!plt_got_address) {
-		return -1;
-	}
-	target->plt_got_address = plt_got_address;
-	/* Copy plt table */
-	reserve mem
-	if(!ReadProcessMemory(pid, plt_got_address, target->plt_got, ))
-	
-	/* Find and copy the dynamic relocation information. */
-	
+	/* Find dynamic information from DYNAMIC section and copy it.
+	 *  ex. dynamic symbol table, dynamic relocations for pltgot...
+	 * */
 	size_t pltrelsz = 0;
 	void *pltreltable_address = NULL;
-	Elf64_Xword pltreltype; int foundTable, foundSize, foundType;
-	foundTable = foundSize = foundType = 0;
+	void *plt_got_address = NULL;
+	Elf64_Xword pltreltype; int foundRelTable, foundRelSize, foundRelType;
+	foundRelTable = foundRelSize = foundRelType = 0;
+
+	void *symtab_address = NULL;
+	void *strtab_address = NULL;
+	size_t strtabsz = 0; int foundStrtabsz = 0;
 	
 	for(Elf64_Dyn *dentry = dyntable;  dentry->d_tag != DT_NULL; dentry++) {
 		switch(dentry->d_tag) {
-			case DT_JMPREL: // vaddress of relocation table
+			case DT_PLTGOT: // address of the PLT GOT
+				plt_got_address = (void *) dentry->d_un.d_ptr;
+			break;
+			// ojalá hubiera un DT_PLTGOTSZ...
+			case DT_JMPREL: // address of relocation table
 				// Even if target is PIE, the va here is already absolute.
-				foundTable = 1;
+				foundRelTable = 1;
 				pltreltable_address = (void*) dentry->d_un.d_ptr;
 			break;
 			case DT_PLTREL: // type of relocation
-				foundType = 1;
+				foundRelType = 1;
 				pltreltype = dentry->d_un.d_val;
 			break;
-			case DT_PLTRELSZ: // size in bytes or relocation table
-				foundSize = 1;
+			case DT_PLTRELSZ: // size in bytes or relocation table for plt got
+				foundRelSize = 1;
 				pltrelsz = dentry->d_un.d_val;				
+			break;
+			case DT_SYMTAB: // address of dynamic symbol table
+				symtab_address = (void*) dentry->d_un.d_ptr;
+			break;
+			// ojalá hubiera un DT_SYMSZ....
+			case DT_STRTAB: // address of string table
+				strtab_address = (void*) dentry->d_un.d_ptr;
+			break;
+			case DT_STRSZ: // size in bytes of string table
+				foundStrtabsz = 1;
+				strtabsz = (size_t) dentry->d_un.d_val;
 			break;
 			
 		}
 	}
-	if(!foundTable || !foundType || !foundSize) {
-		fprintf(stderr, "[-] Could not find dynamic relocation information in memory.");
-		return -1;
+	if(!plt_got_address) {
+		fprintf(stderr, "[-] Could not find PLT GOT of target.");
+		goto _error;
+	}
+	target->plt_got_address = plt_got_address;
+	
+	if(!foundRelTable || !foundRelType || !foundRelSize) {
+		fprintf(stderr, "[-] Could not find dynamic relocation information of target.");
+		goto _error;
 	}
 	
-	char *pltreltable = (char *) xmalloc(pltrelsz);
-	if(!ReadProcessMemory(pid, pltreltable_address, pltreltable, pltrelsz)) {
-		error(6, errno, 
-			  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");	
+	if(!symtab_address || !strtab_address || !foundStrtabsz) 
+	{
+		fprintf(stderr, "[-] Could not find dynamic symbol table or string table in memory\n");
+		goto _error;
 	}
+	
+	
+	// Copy plt got relocation table from target.
+	char *pltreltable = (char *) xmalloc(pltrelsz);
+	if(!ReadProcessMemory(pid, pltreltable_address, pltreltable, pltrelsz))
+		goto _error;
+	
+	// Copy string table from target
+	target->strtab = xmalloc(strtabsz);
+	if(!ReadProcessMemory(pid, strtab_address, target->strtab, strtabsz))
+		goto _error;
 	
 	target->pltreltype = pltreltype;
 	target->pltrelsz = pltrelsz;
@@ -284,14 +304,29 @@ int target_parse_remote_elf(TARGET *target) {
 	else if(pltreltype == DT_RELA) target->u1.pltrelatable = (Elf64_Rela*)pltreltable;
 	else fprintf(stderr, "[-] PLT relocation type corruption detected!\n");
 	
-	fprintf(stderr, "[+] Dynamic relocation info at %p (%llu bytes) ", 
+
+	fprintf(stderr, "[+] Dynamic relocation table for PLT GOT at %p (%llu bytes) ", 
 		pltreltable_address, (unsigned long long) pltrelsz);
 	fprintf(stderr, pltreltype == DT_REL?  "DT_REL\n" : "DT_RELA\n");
 	
-	// DEBUG:
-	//write(1, (const void*)pltreltable, pltrelsz);
-
-	// just some tests here ---------------------------------------------------
+	fprintf(stderr, "[+] Dynamic symbol table at %p\n", 
+		symtab_address);
+	fprintf(stderr, "[+] Dynamic string table at %p (size %llu bytes)\n", 
+		strtab_address, (unsigned long long) strtabsz);
+	
+	/* TODO: <-------------------------------------------------
+	 * Now we have to find the size of the plt got and the size of the
+	 * dynamic symbol table in order to copy them.
+	 * Maybe assuming they have a last NULL entry will work??
+	 * */
+	
+	//-------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
+	//-------------------------------------------------------------------------
+	
+	// DEBUG: IGNORE THIS ---------------------------------------------------
+	// print relocation info to check with readelf of a binary on disk-------
+	// info was correct.
 	/*Elf64_Rela *rels = target->u1.pltrelatable;
 	size_t nrels = target->pltrelsz / sizeof(Elf64_Rela);
 	
@@ -307,62 +342,18 @@ int target_parse_remote_elf(TARGET *target) {
 			 (unsigned long)ELF64_R_TYPE(rels[i].r_info));
 	}*/
 	//-------------------------------------------------------------------------
-	
-	/* Copy dynamic string table and symbol table */
-	// TODO: Merge all searchs on the DYNAMIC segment in the same for!!
-	
-	void *symtab_address = NULL;
-	size_t symtabsz = 0; int foundSymtabsz = 0;
-	void *strtab_address = NULL;
-	size_t strtabsz = 0; int foundStrtabsz = 0;
-	
-	for(Elf64_Dyn *dentry = dyntable;  dentry->d_tag != DT_NULL; dentry++) {
-		switch(dentry->d_tag) {
-			case DT_SYMTAB:
-				symtab_address = (void*) dentry->d_un.d_ptr;
-			break;
-			/*case XXXXXXX: // NECESITO AYUDA PARA SABER EL TAMAÑO O NUM.SIMBOLOS
-				foundSymtabsz = 1;
-				symtabsz = (size_t) dentry->d_un.d_val;
-			break;
-			*/case DT_STRTAB:
-				strtab_address = (void*) dentry->d_un.d_ptr;
-			break;
-			case DT_STRSZ:
-				foundStrtabsz = 1;
-				strtabsz = (size_t) dentry->d_un.d_val;
-			break;
-		}
-	}
-	
-	if(!symtab_address || !strtab_address || 
-		//!foundSymtabsz 
-		 !foundStrtabsz) 
-	{
-			fprintf(stderr, "[-] Could not find dynamic symbol table or string table in memory\n");
-			return -1;
-	}
-	
-	fprintf(stderr, "[+] Dynamic symbol table at %p (size %llu bytes)\n", 
-		symtab_address, (unsigned long long) symtabsz);
-	fprintf(stderr, "[+] Dynamic string table at %p (size %llu bytes)\n", 
-		strtab_address, (unsigned long long) strtabsz);
-	fprintf(stderr, "CACA -- %llu\n", (unsigned long long) sizeof(Elf64_Sym) );
-	
-	target->strtab = xmalloc(strtabsz);
-	if(!ReadProcessMemory(pid, strtab_address, target->strtab, strtabsz)) {
-		error(6, errno, 
-			  "ReadProcessMemory(): ptrace(PTRACE_PEEKTEXT)");	
-	}
+
 	//DEBUG
 	//write(1, (const void*)target->strtab, strtabsz);
-	
-	// TODO copy symbol table, buut first find out its size LOL
+	// after running it through strings(1) it gave expected results.
 	
 	return 1;
+_error:
+	target_free(target);
+	return 0;
 }
 
-/* Given the pid of a process it returns the base address of the executable of the process in its VA space
+/* Given the pid of a process it returns the base address of the main executable of the process.
  * */
 void *_get_base_address(pid_t pid) {
 	char buf[17], *path, *baseaddr_str, *p;
@@ -374,7 +365,7 @@ void *_get_base_address(pid_t pid) {
 	) == -1)
 			return NULL;
 
-	fd = open(path, O_RDONLY);
+	if((fd = open(path, O_RDONLY)) == -1) return NULL;
 	free(path);
 	nread = read(fd, buf, 17);
 	if(nread < 17) return NULL;
@@ -389,8 +380,6 @@ void *_get_base_address(pid_t pid) {
 	// Now baseaddr_str is a null-terminated string like "55f3ecfb3000"
 	// being the base address. We need to convert this into a pointer.
 
-	
-	/* TODO: MAKE THIS CROSS-PLATFORM REGARDLESS OF COMPILATION TARGET */
 	if(sscanf(baseaddr_str, "%p", &base_address) < 1) return NULL;
 	
 	return base_address;
