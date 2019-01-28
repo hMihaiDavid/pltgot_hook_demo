@@ -1,0 +1,61 @@
+what we do and how we do
+
+idea.
+
+Me gustaria buscar el section header en memoria
+The section header is usually placed at the end of the file and doesn't
+fall reliably within a loadable segmen so we can't get it from memory
+
+
+We could find this info from the section header of the ELF on disk.
+Un binario que ha sido pasado por strip(1) sigue manteniendo por ejemplo
+la sección de simbolos dinamicos (.dynsim) y tambien la .plt.got por lo que
+podemos sacar sus tamaños del section header. Parece ser que esta es la manera
+que readelf y objdump usan para acceder a la informacion dinámica.
+
+Now we must copy the dynamic symbol table and pltgot from the target.
+ find the size of the plt got and the
+dynamic symbol table in order to copy them.
+This information is not in the dynamic segment,
+probably because it's not needed by the dynamic linker.
+To solve this:
+
+Puedo asumir que la tabla de simbolos termina en una null entry
+pero no puedo hacer lo mismo con la pltgot puesto que por defecto
+son null si no han sido resueltos(?)
+
+LO que voy a intentar hacer es contar el numero de entradas en la tabla
+de relocations dinamicos, ccuyo tamaño si que viene dado en el PT_DYNAMIC
+asumo que hay una relocation por cada entrada de la pltgot y así supuestamente
+podré sacar el tamaño de la plt got. Supuestamente hay una referencia a cada simbolo dinamico
+mas o menos, si cuento el numero de simbolos referenciados en la tabla de relocations podré
+calcular el tamaño de la tabla de simbolos. Todo esto intentando compensar los off-by-one
+
+
+Si el binario ha sido
+pasado por sstrip de elfkickers no hay
+
+Me gustaria buscar el section header en memoria
+The section header is usually placed at the end of the file and doesn't
+fall reliably within a loadable segmen so we can't get it from memory
+
+FILE, EXACT
+non-dynamimcally linked? no.
+
+mike@mike-laptop:~/Desktop/pltgot$ readelf -s /bin/bash | grep .dynsym
+Symbol table '.dynsym' contains 2367 entries:
+
+
+
+multiplatform clossplatform
+
+
+
+
+
+
+
+
+
+------------
+learn about import resolution

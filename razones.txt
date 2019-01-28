@@ -1,0 +1,28 @@
+en windows no hace falta ptrace stop para manipular el espacio de memoria de un proceso remoto.
+en windows la size de todo esta bien definido y no depende de si el binario esta sstriped o no.
+tampoco hay que tocar el archivo en disco para mirar el section header.
+
+un nivel de indireccion para resolver los imports.
+en widnows no hace falta (aunque se puede hacer) infectar los imports
+porque puedes hacer CreateRemoteThreadEx y VirtualAllocEx
+
+------------
+leo el elf header de memoria pero no debería siquiera estar allí
+
+-----
+mike@mike-laptop:~/Desktop/pltgot$ sudo ./foo 25747
+[+] base address of pid 25747 is 0x400000
+[+] DYNAMIC section at 0x600e20 (size 464 bytes)
+[+] Dynamic relocation table for PLT GOT at 0x400430 (120 bytes) DT_RELA
+[+] Dynamic symbol table at 0x4002b8
+[+] Dynamic string table at 0x400378 (size 88 bytes)
+[+] Estimated size of the PLT GOT: 64 bytes (8 entries)
+[+] Estimated size of dynamic symbol table: 192 bytes (8 entries)
+
+
+[+] ---- DUMP OF PLT GOT OF TARGET ----
+[0]	0x601018:	0x7f1e1e8329c0	(sym. #1)	puts
+[1]	0x601020:	0x7f1e1e8978e0	(sym. #2)	getpid
+[2]	0x601028:	0x4004f6	(sym. #3)	system
+[3]	0x601030:	0x7f1e1e816e80	(sym. #4)	printf
+[4]	0x601038:	0x7f1e1e8968e0	(sym. #7)	pause

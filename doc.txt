@@ -51,6 +51,14 @@ DT_PLTRELSZ
 ----DYNAMIC SYMBOLS-------
 
 
+As mentioned before, symbol lookup is a complicated process, I'll give a simplified description.
+
+For every loaded object RTLD (the runtime dynamic linker) keeps a list of loaded objects called the "lookup scope". Every scope contains pointers to all the loaded objects (the binary and all loaded libraries), but the order of objects can differ between different scopes. What is constant is that the binary is the first object in every scope.
+
+When the RTLD has to resolve a symbol, it first checks for which object it needs to perform the relocation. Was the lookup caused in the binary itself or in one of the loaded libraries. Then it gets the lookup scope for that object, and iterates through every object in it.
+
+For each object it looks for the needed symbol is in the dynamic symbol table. In case of a match it just uses that symbol value for the relocation, otherwise it continues its search looking at the next object in the scope.
+vdso vsyscall
 
 
 
