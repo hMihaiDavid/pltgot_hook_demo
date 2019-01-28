@@ -60,13 +60,16 @@ int memory_map_parse(memory_map_t *map, pid_t pid)
 	
 	memset((void*)map, 0x00, sizeof(memory_map_t));
 	
-	if(asprintf(&path, "/proc/%lu/maps", 
-			(unsigned long) pid
-	) == -1)
-			goto _error;
+	if(pid < 0) {
+		if( !(f = fopen("/proc/self/maps", "r")) ) goto _error;
+	} else {
+		if(asprintf(&path, "/proc/%lu/maps",(unsigned long) pid) == -1)
+				goto _error;
 
-	if( !(f = fopen(path, "r")) ) goto _error;
-	free(path);
+		if( !(f = fopen(path, "r")) ) goto _error;
+		free(path);		
+	}
+	path = NULL;
 	
 	size_t size = NSLOTS*sizeof(memory_region_t);
 	regions = (memory_region_t*) malloc(size);
