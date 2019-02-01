@@ -6,6 +6,10 @@
 
 #include "memory_map_parser.h"
 
+/* Structure that holds all the necessary information about a pltgot entry
+ * in order to infect it. An array of this is filled when parsing a target
+ * in parse_remote_elf().
+ * */
 typedef struct _pltgot_entry {
 	void *slot_address;
 	void *jump_address;

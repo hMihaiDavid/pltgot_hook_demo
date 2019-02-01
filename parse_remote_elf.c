@@ -19,11 +19,6 @@
 #include "memory_map_parser.h"
 
 #include <elf.h>
- 
-/* Structure that holds all the necessary information about a pltgot entry
- * in order to infect it. An array of this is filled when parsing a target
- * in parse_remote_elf().
- * */
 
 static const char *_get_module_name_from_base(TARGET *target, void *baseaddr);
 static int _target_parse_pltgot(TARGET *target);
