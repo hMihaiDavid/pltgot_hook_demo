@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+/* All void pointers ending in "_address" are pointers in the VA space of
+ * the target process. They are invalid.
+ * */
+
 typedef struct _memory_region {
 	void *start_address;
 	void *end_address;
@@ -12,6 +16,7 @@ typedef struct _memory_region {
 	char dev[12]; // major:minor ex: "08:02", null terminated.
 	int inode;
 	char *path; /* Will be NULL if not present */
+	char *module; /* Will be NULL if not present */
 } memory_region_t;
 
 typedef struct _memory_map {

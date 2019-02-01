@@ -8,11 +8,14 @@
 
 #include "memory_map_parser.h"
 
-int _parse_line(const char *line, memory_region_t *region)
+static int _parse_line(char *line, memory_region_t *region)
 {	
 	int res, n = 0;
 	unsigned long start_address, end_address;
 	unsigned int off;
+	
+	region->module = NULL;
+	region->path = NULL;
 	
 	res = sscanf(line, "%lx-%lx %4c %x %11s %d %n", &start_address, 
 	&end_address, region->perms, &off, region->dev, &region->inode, &n);
@@ -21,7 +24,7 @@ int _parse_line(const char *line, memory_region_t *region)
 		return 0;
 	}
 	
-	const char *path = line+n;
+	char *path = line+n;
 	size_t path_len = strlen(path);
 	region->path = malloc(path_len+1);
 	if(!region->path) return 0;
@@ -31,6 +34,24 @@ int _parse_line(const char *line, memory_region_t *region)
 	region->start_address = (void*) start_address;
 	region->end_address = (void*) end_address;
 	region->offset = (off_t) off;
+	
+	// fill region->module.
+	if(*path != '[') {
+		char *p = path+path_len-1;
+		while(*p != '/' && p >= path) p--;
+		char *module = p; module++;
+		size_t module_len = strlen(module);
+		
+		p = module+module_len; p--;
+		if(*p == '\n') *p = '\0';
+		while(*p != '.' && p > module) p--;
+		if(*p == '.' && p > module) *p = '\0';
+		module_len = strlen(module);
+		
+		region->module = malloc(module_len+1);
+		if(region->module == NULL) return 0;
+		strcpy(region->module, module);
+	}
 	
 	/*fprintf(stderr, "---%p;%p;%s;%d;%s;%d;%s\n", region->start_address, region->end_address,region->perms,
 			(int)region->offset, region->dev, region->inode, region->path);
@@ -42,6 +63,7 @@ void memory_map_free(memory_map_t *map)
 {
 	for(size_t i=0; i<map->num_regions; i++) {
 		free(map->regions[i].path);
+		free(map->regions[i].module);
 	}
 	free(map->regions); map->regions = NULL;
 	map->num_regions = 0;

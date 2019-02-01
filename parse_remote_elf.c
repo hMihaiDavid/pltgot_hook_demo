@@ -1,3 +1,7 @@
+/* All void pointers ending in "_address" are pointers in the VA space of
+ * the target process. They are invalid.
+ * */
+ 
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,83 +15,23 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "parse_remote_elf.h"
 #include "memory_map_parser.h"
 
 #include <elf.h>
-
-/* All void pointers ending in "_address" are pointers in the VA space of
- * the target process. They are invalid.
- * */
  
 /* Structure that holds all the necessary information about a pltgot entry
  * in order to infect it. An array of this is filled when parsing a target
  * in parse_remote_elf().
  * */
-typedef struct _pltgot_entry {
-	void *slot_address;
-	void *jump_address;
-	void *module_base; // can be NULL if it cannot be retrieved.
-	ssize_t symindex; // can be -1 if not found
-	const char *symname; // can be NULL if cannot be retrieved.
-	const char *module_name; // can be NULL if module_base is NULL or lookup failed.
-} pltgot_entry_t;
-// TODO: Write a MACRO that evaluates to whether a pltgotentry is suitable for
-// infection or not, that is to say, module_base is not null and more...
 
-typedef struct _TARGET {
-	pid_t pid;
-	void *base_address;
-	memory_map_t maps;
-	
-	size_t sizeofimage;
-	Elf64_Ehdr header; // elf header copied from target.
-	Elf64_Phdr *pheader; // program header copied from target.
-	Elf64_Dyn  *dyntable; // the DYNAMIC segment copied from target.
-	
-	void *plt_got_address; // address of plt got in target VA space.
-	Elf64_Addr *plt_got; // the plt got copied from target.
-	size_t plt_gotsz; // size in bytes of the plt got.
-	
-	// Dynamic relocation information
-	size_t pltrelsz; // size in bytes of plt got relocation table used by dynamic linker.
-	size_t numrelocs; // number of entries in the aforementioned reloc table. Redundant.
-	union { // table of relocation entries for plt got, copied from target.
-		Elf64_Rel *pltreltable;
-		Elf64_Rela *pltrelatable;
-	} u1;
-	// whether plt got relocations are of type Elf64_Rel or Elf64_Rela.
-	// this determines how to interpret u1
-	Elf64_Xword pltreltype; // can be either DT_REL or DT_RELA
-	
-	//Dynamic symbols table and string table
-	size_t symtabsz; // size in bytes
-	Elf64_Sym *symtab;
-	size_t strtabsz; // size in bytes
-	char *strtab;
-	
-	/* This array is filled with info about each pltgot entry.
-	 * It is used for infecting them. It is filled when parsing.
-	 * */
-	pltgot_entry_t *pltgot_entries;
-
-} TARGET;
-
-int target_init(TARGET *target, pid_t pid);
-int target_parse_remote_elf(TARGET *target);
-char *target_get_symbol_name(TARGET *target, ssize_t symindex);
-int target_is_address_in(TARGET *target, void *addr);
-void *target_find_base(TARGET *target, void *addr);
-void target_free(TARGET *target);
-int _target_parse_pltgot(TARGET *target);
+static const char *_get_module_name_from_base(TARGET *target, void *baseaddr);
+static int _target_parse_pltgot(TARGET *target);
 
 void *xmalloc(size_t size) {
 	void *res = malloc(size);
 	if(!res) error(-1, errno, "malloc()");
 	return res;
-}
-
-void usage(char *cmd) {
-	printf("Usage: %s <TARGET_PID>\n", cmd);		
 }
 
 /*
@@ -135,7 +79,7 @@ int ReadProcessMemory(int pid, const void *base_address,
 	#undef _WORD_SIZE
 }
 
-char *target_get_symbol_name(TARGET *target, ssize_t symindex)
+const char *target_get_symbol_name(TARGET *target, ssize_t symindex)
 {
 	if(symindex < 0) return NULL;
 	Elf64_Sym *sym = &target->symtab[symindex];
@@ -146,31 +90,23 @@ char *target_get_symbol_name(TARGET *target, ssize_t symindex)
  * returns a boolean telling whether the pointer falls within
  * the image of the main executable or not.
  * */
-int target_is_address_in(TARGET *target, void *addr)
+int is_address_in_target(TARGET *target, void *addr)
 {			
 	return ( ((size_t)addr) < ((size_t)target->base_address + target->sizeofimage) )
 			&& ( ((size_t)addr) >= ((size_t)target->base_address) );
 }
 
-int _target_parse_pltgot(TARGET *target)
+static int _target_parse_pltgot(TARGET *target)
 {
+	if(target->pltgot_entries) free(target->pltgot_entries);
+	
 	// First 3 entries are reserved. See SysV amd64 ABI supplement.
 	size_t numentries = (target->plt_gotsz/sizeof(Elf64_Addr))-3;
 	pltgot_entry_t *entries = xmalloc(numentries*sizeof(pltgot_entry_t));
 	target->pltgot_entries = entries;
 	
-	/*typedef struct _pltgot_entry {
-	void *slot_address;
-	void *jump_address;
-	void *module_base;
-	ssize_t symindex;
-	const char *symname;
-	const char *module_path;
-} pltgot_entry_t;
-	 * */
-	
 	Elf64_Addr *p = target->plt_got+3;
-	for(size_t i=0; i<numentries; i++, p++) {
+	for(size_t i=0; i<numentries; i++) {
 		pltgot_entry_t *entry = &entries[i];
 		Elf64_Addr jmpaddr = *p;
 		void *slot_address = (void*)(((size_t)target->plt_got_address)+((size_t)p - (size_t)target->plt_got));
@@ -200,82 +136,13 @@ int _target_parse_pltgot(TARGET *target)
 		entry->symindex = symindex;
 		entry->symname = target_get_symbol_name(target, symindex);
 		entry->module_base = target_find_base(target, (void*)jmpaddr);
-		//entry->module_name = _get_module_name_from_path();
-		// HERE'S WHERE I SHOULD CONTINUE
-		return 1;
-	}
-}
-
-void _target_dump_imports(TARGET *target)
-{
-	/* Traverse pltgot, for each pltgot entry find
-	 * its corresponding dynamic relocation entry and
-	 * dump the name of the symbol it points to.
-	*/
+		entry->module = _get_module_name_from_base(target, entry->module_base);
+		entry->is_resolved = !is_address_in_target(target, entry->jump_address);
 	
-	// First 3 entries are reserved. See SysV amd64 ABI supplement.
-	Elf64_Addr *p = target->plt_got+3;
-	size_t n = (target->plt_gotsz/sizeof(Elf64_Addr))-3;
-	for(size_t i=0; i<n; i++, p++) {
-		Elf64_Addr jmpaddr = *p;
-		void *slot_address = (void*)(((size_t)target->plt_got_address)+((size_t)p - (size_t)target->plt_got));
-		
-		ssize_t symindex = -1; // TODO: Use an invalid index as specified in the docs.
-		
-		// Find the symbol table index for the current pltgot entry.
-		for(size_t ri=0; ri < target->numrelocs; ri++) {
-			Elf64_Addr r_offset; void *fixaddr;
-			uint64_t r_info;
-			if(target->pltreltype == DT_REL) {
-				r_offset = target->u1.pltreltable[ri].r_offset;
-				r_info = target->u1.pltreltable[ri].r_info;
-			} else if(target->pltreltype == DT_RELA) {
-				r_offset = target->u1.pltrelatable[ri].r_offset;
-				r_info = target->u1.pltrelatable[ri].r_info;
-			}
-
-			fixaddr = (void *)r_offset;
-			if(target->header.e_type == ET_DYN) // the binary is pie so va is relative.
-				fixaddr = (void*)((size_t)fixaddr+(size_t)target->base_address);
-
-			if(fixaddr == slot_address) symindex = ELF64_R_SYM(r_info);
-		}
-		if(symindex < 0) {
-			fprintf(stderr, "[%lu] %p:\t%p\t(sym. #?)\tCANNOT FIND SIMBOL\n", i, slot_address, (void*)jmpaddr);
-		} else {
-			char *symname = target_get_symbol_name(target, symindex);
-			char *info_str = target_is_address_in(target, (void*)jmpaddr) ? " (not resolved)" : "";
-			
-			fprintf(stderr, "[%lu] %p:\t%p\t(sym. #%ld)\t%s%s <%p>\n", i, slot_address, (void*)jmpaddr, 
-							symindex, symname, info_str, target_find_base(target, (void*)jmpaddr) );
-		}
+		p++;
 	}
 	
-}
-
-int main(int argc, char *argv[]) {
-	pid_t pid;
-	long res;
-	TARGET target;
-
-	if(argc < 2) {
-		usage(argv[0]);
-		return 1;		
-	}
-	
-	pid = (pid_t) atoll(argv[1]);
-	
-	if(!target_init(&target, pid))
-		error(2, errno, "target_init");
-	
-	if(!target_parse_remote_elf(&target))
-		error(3, errno, "target_parse_remote_elf");
-	
-	fprintf(stderr, "\n\n[+] ---- DUMP OF PLT GOT OF TARGET ----\n");
-	_target_dump_imports(&target);
-	
-	target_free(&target);
-	return 0;
+	return 1;
 }
 
 int target_init(TARGET *target, pid_t pid) {
@@ -537,7 +404,7 @@ int target_parse_remote_elf(TARGET *target) {
 	/* Fill the array target.pltgot_entries with the necessary info about
 	 * each pltgot entry needed to infect it.
 	 * */
-	//_target_parse_pltgot(target);
+	_target_parse_pltgot(target);
 	
 	// DEBUG
 	//write(1, (const void*)target->plt_got, target->plt_gotsz);
@@ -547,26 +414,6 @@ int target_parse_remote_elf(TARGET *target) {
 	//-------------------------------------------------------------------------
 	//-------------------------------------------------------------------------
 	
-	// DEBUG: IGNORE THIS ---------------------------------------------------
-	// print relocation info to check with readelf of a binary on disk-------
-	// info was correct.
-	/*Elf64_Rela *rels = target->u1.pltrelatable;
-	size_t nrels = target->pltrelsz / sizeof(Elf64_Rela);
-	
-	fprintf(stderr,"\n\n---- SOME RELOCATION TARGET VAs ---- (nrels=%llu) \n\n",
-			(unsigned long long)nrels);
-	for(size_t i=0; i<nrels; i++) {
-		void *fixva = (void*)(((char *)rels[i].r_offset)+
-						  ((size_t)base_address));
-						  
-		fprintf(stderr, "\t[I] offset: %p, va: %p, sym: %llu, type: %lu\n", 
-			 (void*) rels[i].r_offset, fixva, 
-			 (unsigned long long)ELF64_R_SYM(rels[i].r_info),
-			 (unsigned long)ELF64_R_TYPE(rels[i].r_info));
-	}*/
-	//-------------------------------------------------------------------------
-	//-------------------------------------------------------------------------
-	//-------------------------------------------------------------------------
 	
 	// THE END
 	return 1;
@@ -598,6 +445,21 @@ void *target_find_base(TARGET *target, void *addr)
 		if(strcmp(r->dev, belong_region->dev) == 0
 			&& r->inode == belong_region->inode)
 			return r->start_address;
+	}
+	return NULL;
+}
+
+/* Givwen the base address of a module in target va space,
+ * it returns a string with the name of said module.
+ * returns NULL when the module is a special region in the memory map:
+ * [heap], [stack]... instead of being mapped from a file.
+ * */
+static const char *_get_module_name_from_base(TARGET *target, void *baseaddr)
+{
+	memory_map_t *maps = &target->maps;
+	for(uint32_t i = 0; i<maps->num_regions; i++) {
+		if(maps->regions[i].start_address == baseaddr)
+			return maps->regions[i].module; // will be null if special region.
 	}
 	return NULL;
 }
