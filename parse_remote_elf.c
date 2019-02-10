@@ -66,7 +66,7 @@ int ReadProcessMemory(int pid, const void *base_address,
 		char *p = (char *) laddr;
 		for(int i=0; i<remaining; i++) {
 			*p = (char)( (res >> (i*8)) & 0xFF );
-			p++;		
+			p++;
 		}
 	}
 	

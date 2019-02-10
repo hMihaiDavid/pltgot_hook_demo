@@ -34,6 +34,7 @@ static int _parse_line(char *line, memory_region_t *region)
 	region->start_address = (void*) start_address;
 	region->end_address = (void*) end_address;
 	region->offset = (off_t) off;
+	region->shellcode_address = NULL;
 	
 	// fill region->module.
 	if(*path != '[') {

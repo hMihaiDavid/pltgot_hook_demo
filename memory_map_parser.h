@@ -17,6 +17,8 @@ typedef struct _memory_region {
 	int inode;
 	char *path; /* Will be NULL if not present */
 	char *module; /* Will be NULL if not present */
+	
+	void *shellcode_address; // address of the injected shellcode within a region.
 } memory_region_t;
 
 typedef struct _memory_map {

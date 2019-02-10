@@ -19,6 +19,7 @@ typedef struct _pltgot_entry {
 	const char *symname; // can be NULL if cannot be retrieved.
 	const char *module; // can be NULL if module_base is NULL or lookup failed.
 	int is_resolved;
+	int is_infected; // so that it doesn't get infected twice.
 } pltgot_entry_t;
 // TODO: Write a MACRO that evaluates to whether a pltgotentry is suitable for
 // infection or not, that is to say, module_base is not null and more...
@@ -58,7 +59,6 @@ typedef struct _TARGET {
 	 * It is used for infecting them. It is filled when parsing.
 	 * */
 	pltgot_entry_t *pltgot_entries;
-
 } TARGET;
 
 int target_init(TARGET *target, pid_t pid);
