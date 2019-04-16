@@ -59,3 +59,17 @@ multiplatform clossplatform
 
 ------------
 learn about import resolution
+TODO
+- Very important!! in main of infect.c, out of bounds access may happen due to improper imput check.
+- Put (target.plt_gotsz/sizeof(Elf64_Addr))-3; into a macro
+- make infect return something.
+- properly write format strings in dump_pltgot.c
+- argv list parsing int conversion
+- xmalloc
+- is_object_infected deallocation
+- Refactor ReadProcessMemory and WriteProcessMemory into their own files.
+- Shellcode multiple of word size???
+- Unmap shellcode, although not necessary.
+- make a Common.h thing.
+- Already infected message?
+- The replicated ELF code

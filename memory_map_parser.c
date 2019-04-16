@@ -35,6 +35,7 @@ static int _parse_line(char *line, memory_region_t *region)
 	region->end_address = (void*) end_address;
 	region->offset = (off_t) off;
 	region->shellcode_address = NULL;
+	region->elfheader = NULL; region->pheader = NULL;
 	
 	// fill region->module.
 	if(*path != '[') {
@@ -65,6 +66,9 @@ void memory_map_free(memory_map_t *map)
 	for(size_t i=0; i<map->num_regions; i++) {
 		free(map->regions[i].path);
 		free(map->regions[i].module);
+		free(map->regions[i].elfheader);
+		free(map->regions[i].pheader);
+		
 	}
 	free(map->regions); map->regions = NULL;
 	map->num_regions = 0;

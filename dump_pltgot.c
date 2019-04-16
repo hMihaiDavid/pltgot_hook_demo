@@ -5,6 +5,7 @@
 
 #include "memory_map_parser.h"
 #include "parse_remote_elf.h"
+#include "mem.h"
 
 void dump_pltgot(pid_t pid)
 {

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <elf.h>
 
 /* All void pointers ending in "_address" are pointers in the VA space of
  * the target process. They are invalid.
@@ -19,6 +20,9 @@ typedef struct _memory_region {
 	char *module; /* Will be NULL if not present */
 	
 	void *shellcode_address; // address of the injected shellcode within a region.
+	Elf64_Ehdr *elfheader; 	// ELF and program header copied from target.
+	Elf64_Phdr *pheader;   	// only valid if this region the first region of an object/executable.
+							// They are lazy loaded by inject_shellcode in infect.c
 } memory_region_t;
 
 typedef struct _memory_map {

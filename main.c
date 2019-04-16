@@ -11,13 +11,13 @@ void infect(pid_t pid, size_t list[], size_t list_size, char *shellcode_path);
 void usage(char *cmd) {
 	printf(	"Usage: %s <PID>\t\t\tDump PLT GOT (imports)\n"
 			"       %s <PID> [LIST] /path/sc.bin\tInfect PLTGOT entries\n"
+			"NOTE: At the moment the LIST can be of only 1 element.\n"
 			"\nExamples:\n"
 			"       sudo %s 9940 8 2-4 7 ./shellcode.bin\n"
 			"         ^\n"
 			"         |--- Infects entries 2 to 4 (both included), 7 and 8\n"
 			"               Dump the PLTGOT first to see the entries indexes.\n\n"
-			"       sudo %s 9970 1 -\t\tReads shellcode from STDIN\n"
-	,cmd, cmd, cmd, cmd);
+	,cmd, cmd, cmd);
 }
 
 size_t *parse_argv_list(int argc, char **argv, size_t *list_size);
@@ -52,6 +52,10 @@ int main(int argc, char **argv)
 		if(!list || !shellcode_path) {
 			fprintf(stderr, "Invalid input. Run %s without arguments for help\n", argv[0]);
 			return 3;
+		}
+		if(list_size > 1) {
+			fprintf(stderr, "\nThe current version can only infect one entry of a process.\n");
+			return 4;
 		}
 		infect(pid, list, list_size, shellcode_path);
 	}
