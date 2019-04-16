@@ -6,17 +6,21 @@
 #include <errno.h>
 
 void dump_pltgot(pid_t pid);
-void infect(pid_t pid, size_t list[], size_t list_size, char *shellcode_path);
+void infect(pid_t pid, int entry_num, char *shellcode_path);
 
 void usage(char *cmd) {
 	printf(	"Usage: %s <PID>\t\t\tDump PLT GOT (imports)\n"
-			"       %s <PID> [LIST] /path/sc.bin\tInfect PLTGOT entries\n"
-			"NOTE: At the moment the LIST can be of only 1 element.\n"
+			"       %s <PID> <entry_num> /path/sc.bin\tInfect PLTGOT entry\n"
 			"\nExamples:\n"
-			"       sudo %s 9940 8 2-4 7 ./shellcode.bin\n"
+			"       sudo %s 9940 8 ./shellcode.bin\n"
 			"         ^\n"
-			"         |--- Infects entries 2 to 4 (both included), 7 and 8\n"
-			"               Dump the PLTGOT first to see the entries indexes.\n\n"
+			"         |--- Infects entry number 8 in the PLTGOT of process PID 9940\n"
+			"              Dump the PLTGOT first to see the entries indexes.\n\n"
+			"\n"
+			" You can infect the target several times as long as you infect\n"
+			" functions on different shared objects. If you try to infect, let's say,\n"
+			" printf and exit (both on libc), you will corrupt the shellcode's return address!\n"
+			"\n There can only be one instance of a shellcode per shared object.\n"
 	,cmd, cmd, cmd);
 }
 
@@ -45,19 +49,15 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Invalid PID. Run %s without arguments for help.\n", argv[0]);
 			return 2;
 		}
-		size_t list_size;
-		size_t *list = parse_argv_list(argc, argv, &list_size);
 		char *shellcode_path = parse_shellcode(argc, argv);
-		
-		if(!list || !shellcode_path) {
+		int entry_num = atoi(argv[2]);
+
+		if(!shellcode_path) {
 			fprintf(stderr, "Invalid input. Run %s without arguments for help\n", argv[0]);
 			return 3;
 		}
-		if(list_size > 1) {
-			fprintf(stderr, "\nThe current version can only infect one entry of a process.\n");
-			return 4;
-		}
-		infect(pid, list, list_size, shellcode_path);
+
+		infect(pid, entry_num, shellcode_path);
 	}
 	
 	return 0;
@@ -71,93 +71,3 @@ static char *parse_shellcode(int argc, char **argv) {
 	}
 	return NULL;
 }
-
-/* parse_argv_list */
-/* Singly-linked list of size_t */
-typedef struct _node {
-	size_t data;
-	struct _node *next;
-} node_t;
-typedef struct _list {
-	node_t *head;
-	size_t size;
-} list_t;
-static list_t *list_init(list_t *list);
-static void *list_add(list_t *list, size_t n);
-static void list_free(list_t *list);
-
-static void *xmalloc(size_t size) {
-	void *res = malloc(size);
-	if(!res) error(-1, errno, "malloc()");
-	return res;
-}
-
-size_t *parse_argv_list(int argc, char **argv, size_t *list_size) {
-	list_t l;
-	list_init(&l);
-	
-	char **p = &argv[2];
-	while(*p) {
-		if(!isdigit(**p)) break; //end of list
-		char *h;
-		if(h = strstr(*p, "-")) {
-			// range of 2 values, h points to "-" separator. 
-			*h = '\0';
-			size_t a = (size_t) atol(*p);
-			size_t b = (size_t) atol(h+1);
-			if((a == 0 && **p != '0') || (b == 0 && *(h+1) != '0')) {
-				// non numeric string
-				list_free(&l); return NULL;
-			}
-			if(b < a) { size_t aux = a; a = b; b = aux; }
-			for(size_t i=a; i<=b; i++) list_add(&l, i);
-		} else {
-			size_t n = (size_t) atol(*p);
-			if(n == 0 && **p != '0') {
-				// non numeric string
-				list_free(&l); return NULL;
-			}
-			list_add(&l, n);
-		}
-		
-		p++;
-	}
-	
-	/* convert list into an array */
-	if(list_size) *list_size = l.size;
-	if(l.size == 0) {list_free(&l); return NULL; }
-	
-	size_t *res = xmalloc(l.size * sizeof(size_t));
-	size_t i = l.size-1;
-	node_t *node = l.head;
-	while(node) {
-		res[i] = node->data;
-		i--;
-		node = node->next;	
-	}
-	list_free(&l);
-	return res;
-}
-/* Singly-linked list of size_t (simple stack implementation) */
-static list_t *list_init(list_t *list) {
-	memset((void*)list, 0x00, sizeof(list_t));
-	return list;
-}
-
-static void *list_add(list_t *list, size_t n) {
-	node_t *new_node = (node_t*)xmalloc(sizeof(node_t));
-	new_node->next = list->head;
-	new_node->data = n;	
-	list->head = new_node;
-	list->size++;
-}
-
-static void list_free(list_t *list) {
-	node_t *node = list->head;
-	while(node) {
-		node = node->next;
-		free(node);
-	}
-	list->head = NULL;
-}
-

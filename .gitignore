@@ -1,6 +1,7 @@
 foo
 test
 test_pie
+shellcode/sc.bin
 doc.txt
 old.c
 sstrip

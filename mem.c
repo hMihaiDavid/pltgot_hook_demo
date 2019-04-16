@@ -57,7 +57,8 @@ int ReadProcessMemory(int pid, const void *base_address,
 
 
 /* 
- * IMPORTANT: size must be a multiple of the word size.
+ * IMPORTANT: size must be a multiple of the word size, otherwise, it is aligned UP to the next
+ * word multiple and MORE BYTES WILL BE READ FROM SOURCE AND WRITTEN TO DESTINATION than expected!!!.
  * */
 int WriteProcessMemory(int pid, void *base_address, 
 							const void *buffer, size_t size) 
@@ -69,7 +70,8 @@ int WriteProcessMemory(int pid, void *base_address,
 	raddr = (long *) base_address;
 	laddr = (long *) buffer;
 
-	sb = size / _WORD_SIZE;			
+	sb = size / _WORD_SIZE;
+	if(size % _WORD_SIZE != 0) sb++;
 
 	for(size_t i = 0; i < sb; i++) {
 		long res = ptrace(PTRACE_POKETEXT, pid, (void *) raddr, (void*) *laddr);
