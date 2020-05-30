@@ -1,7 +1,8 @@
 # pltgot
 Linux x86_64 PLT hooking. Examine and hook a live process library imports.
 
-I wrote this some years ago and haven't tested it since then.
+I wrote this some years ago and haven't tested it since then. I'm dumping it now cause someone might find it useful.
+
 given a live linux process this tools allows you to dump it's plt table (library imports) and
 to hook them. It injects a shellcode of your chosing in the target's executable memory and
 patches specified .plt.got entries to point to your shellcode, which can return to the original if wanted.
